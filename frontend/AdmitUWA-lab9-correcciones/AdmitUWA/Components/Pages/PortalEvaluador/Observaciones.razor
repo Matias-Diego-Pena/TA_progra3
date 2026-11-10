@@ -1,0 +1,62 @@
+@page "/evaluador/observaciones"
+@inject DatosSesion Datos
+
+<PageTitle>Observaciones · AdmitU</PageTitle>
+
+<PageHeader Titulo="Seguimiento de observaciones" Subtitulo="Las observaciones se registran desde la revisión de cada documento. Aquí se consulta si el postulante ya las subsanó." Migas="@(["Observaciones"])" />
+
+<div class="chips" role="group" aria-label="Filtrar por estado">
+    <button type="button" class="chip @(estado is null ? "is-active" : "")" @onclick="() => estado = null">Todas<em>@base_.Count</em></button>
+    @foreach (var e in Enum.GetValues<EstadoObservacion>())
+    {
+        var actual = e;
+        <button type="button" class="chip @(estado == actual ? "is-active" : "")" @onclick="() => estado = actual">@actual.Etiqueta()<em>@base_.Count(o => o.Estado == actual)</em></button>
+    }
+</div>
+
+<DataTable TItem="Observacion" Items="@base_.Where(o => (estado is null || o.Estado == estado) && (tipo == "" || o.Tipo.ToString() == tipo))"
+           TextoBusqueda="@(o => $"{Postulacion(o)?.Codigo} {Datos.PersonaDe(Postulacion(o))?.NombreCompleto} {Datos.Documento(o.DocumentoId)?.Requisito} {o.Descripcion}")"
+           Marcador="Buscar por postulación, postulante, documento o descripción" TituloVacio="Sin observaciones" MensajeVacio="No hay observaciones con estos filtros.">
+    <Filtros>
+        <select class="select" aria-label="Alcance" @bind="soloMias">
+            <option value="true">Mis expedientes</option>
+            <option value="false">Todos los evaluadores</option>
+        </select>
+        <select class="select" aria-label="Tipo de observación" @bind="tipo">
+            <option value="">Cualquier tipo</option>
+            @foreach (var t in Enum.GetValues<TipoObservacion>()) { <option value="@t">@t.Etiqueta()</option> }
+        </select>
+    </Filtros>
+    <Encabezado><th>Fecha</th><th>Postulación</th><th>Documento</th><th>Tipo</th><th>Qué debe corregir</th><th>Estado</th><th class="th-actions">Acciones</th></Encabezado>
+    <Fila Context="o">
+        @{ var p = Postulacion(o); }
+        <tr>
+            <td>@Formato.Fecha(o.Fecha)</td>
+            <td><span class="mono">@p?.Codigo</span><span class="cell-sub">@Datos.PersonaDe(p)?.NombreCompleto</span></td>
+            <td>@Datos.Documento(o.DocumentoId)?.Requisito</td>
+            <td>@o.Tipo.Etiqueta()</td>
+            <td class="wrap">@o.Descripcion</td>
+            <td><StatusBadge Texto="@o.Estado.Etiqueta()" Tono="@o.Estado.Tono()" /></td>
+            <td class="td-actions">
+                <span class="row-actions">
+                    @if (p?.EvaluadorId == Datos.EvaluadorActualId)
+                    {
+                        <BotonAccion Tipo="BotonAccion.Accion.Ver" Texto="Abrir revisión" Sobre="@p.Codigo" Href="@($"/evaluador/postulaciones/{p.Id}")" />
+                    }
+                </span>
+            </td>
+        </tr>
+    </Fila>
+</DataTable>
+
+@code {
+    private EstadoObservacion? estado = EstadoObservacion.Abierta;
+    private string tipo = "";
+    private bool soloMias = true;
+
+    private List<Observacion> base_ => Datos.Observaciones
+        .Where(o => !soloMias || Postulacion(o)?.EvaluadorId == Datos.EvaluadorActualId)
+        .OrderByDescending(o => o.Fecha).ToList();
+
+    private Postulacion? Postulacion(Observacion o) => Datos.Postulacion(Datos.Documento(o.DocumentoId)?.PostulacionId ?? 0);
+}

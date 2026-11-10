@@ -1,0 +1,143 @@
+@page "/postulante/vouchers"
+@inject DatosSesion Datos
+@inject ToastService Avisos
+
+<PageTitle>Mis vouchers · AdmitU</PageTitle>
+
+<PageHeader Titulo="Mis vouchers" Subtitulo="El pago se hace por transferencia bancaria. Aquí registras el voucher para que lo validemos." Migas="@(["Mis vouchers"])" />
+
+@if (pagos.Count == 0)
+{
+    <section class="card"><EmptyState Icono="credit-card" Titulo="Aún no tienes pagos" Mensaje="El derecho de inscripción se genera al enviar tu postulación." /></section>
+}
+
+@foreach (var pago in pagos)
+{
+    var p = Datos.Postulacion(pago.PostulacionId)!;
+    var vouchers = Datos.VouchersDe(p.Id);
+    var pendiente = vouchers.FirstOrDefault(v => v.Estado == EstadoVoucher.Pendiente);
+    var rechazado = vouchers.FirstOrDefault(v => v.Estado == EstadoVoucher.Rechazado);
+    <section class="card card-pad" style="margin-bottom:18px">
+        <div class="card-head">
+            <div><h2>@p.Codigo · @Datos.Carrera(p.CarreraId)?.Nombre</h2><p>Derecho de inscripción: <strong>@Formato.Soles(pago.Monto)</strong> · código de pago <span class="mono">@pago.Codigo</span></p></div>
+            <StatusBadge Texto="@pago.Estado.Etiqueta()" Tono="@pago.Estado.Tono()" />
+        </div>
+
+        @if (pago.Estado == EstadoPago.Aprobado)
+        {
+            <p class="inline-note is-success"><Icon Name="check-circle" Size="16" /><span>Pago validado el @Formato.Fecha(pago.FechaAprobacion). No necesitas hacer nada más con este pago.</span></p>
+        }
+        else if (pendiente is not null)
+        {
+            <p class="inline-note"><Icon Name="clock" Size="16" /><span>Tu voucher @pendiente.CodigoOperacion está en validación. Si te equivocaste, puedes retirarlo y registrar otro.</span></p>
+        }
+        else
+        {
+            @if (rechazado is not null && pago.Estado == EstadoPago.Rechazado)
+            {
+                <p class="inline-note is-warning" style="margin-bottom:12px"><Icon Name="alert" Size="16" /><span>Tu voucher @rechazado.CodigoOperacion fue rechazado: @rechazado.MotivoRechazo</span></p>
+            }
+            <button type="button" class="btn btn-primary" @onclick="() => AbrirRegistro(p, pago)"><Icon Name="upload" Size="16" />Registrar voucher</button>
+        }
+
+        @if (vouchers.Count > 0)
+        {
+            <div class="table-scroll" style="margin-top:16px">
+                <table class="table">
+                    <thead><tr><th>N.° de operación</th><th class="num">Importe</th><th>Comprobante</th><th>Registrado</th><th>Estado</th><th class="th-actions">Acciones</th></tr></thead>
+                    <tbody>
+                        @foreach (var v in vouchers)
+                        {
+                            <tr>
+                                <td><span class="mono">@v.CodigoOperacion</span></td>
+                                <td class="num">@Formato.Soles(v.Monto)</td>
+                                <td>@v.Archivo</td>
+                                <td>@Formato.Fecha(v.FechaRegistro)</td>
+                                <td><StatusBadge Texto="@v.Estado.Etiqueta()" Tono="@v.Estado.Tono()" /></td>
+                                <td class="td-actions">
+                                    <span class="row-actions">
+                                        <BotonAccion Tipo="BotonAccion.Accion.Eliminar" Texto="Retirar voucher" Sobre="@v.CodigoOperacion" Deshabilitado="@(v.Estado != EstadoVoucher.Pendiente)"
+                                                     MotivoDeshabilitado="Solo se puede retirar mientras está en validación" OnClick="() => porRetirar = v" />
+                                    </span>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+}
+
+<Drawer Abierto="registrando is not null" Titulo="Registrar voucher" Descripcion="@($"Postulación {registrando?.Codigo}")" OnCerrar="() => registrando = null">
+    <EditForm Model="modelo" OnValidSubmit="Registrar" class="drawer-form">
+        <DataAnnotationsValidator />
+        <div class="drawer-body">
+            <div class="field"><label for="v-op">Número de operación <span class="req">*</span></label><InputText id="v-op" @bind-Value="modelo.CodigoOperacion" placeholder="Figura en tu voucher" /><ValidationMessage For="() => modelo.CodigoOperacion" /></div>
+            <div class="field"><label for="v-monto">Importe transferido (S/) <span class="req">*</span></label><InputNumber id="v-monto" @bind-Value="modelo.Monto" step="0.01" /><ValidationMessage For="() => modelo.Monto" /></div>
+            <div class="field">
+                <span class="label">Voucher <span class="req">*</span></span>
+                <ZonaCarga Etiqueta="Subir voucher" Formato="FormatoArchivo.Cualquiera" OnArchivo="n => modelo.Archivo = n ?? string.Empty" />
+                <ValidationMessage For="() => modelo.Archivo" />
+            </div>
+        </div>
+        <div class="drawer-foot">
+            <button type="button" class="btn btn-ghost" @onclick="() => registrando = null">Cancelar</button>
+            <button type="submit" class="btn btn-primary"><Icon Name="check" Size="16" />Registrar</button>
+        </div>
+    </EditForm>
+</Drawer>
+
+<ConfirmDialog Abierto="porRetirar is not null" Titulo="Retirar voucher" Mensaje="@($"Se retirará el voucher {porRetirar?.CodigoOperacion}. Podrás registrar otro.")" TextoConfirmar="Retirar"
+               OnCancelar="() => porRetirar = null" OnConfirmar="Retirar" />
+
+@code {
+    private sealed class FormularioVoucher
+    {
+        [Required(ErrorMessage = "Ingresa el número de operación.")]
+        [RegularExpression("^[A-Za-z0-9-]{4,30}$", ErrorMessage = "Usa solo letras, números o guiones (de 4 a 30 caracteres).")]
+        public string CodigoOperacion { get; set; } = "";
+        [Range(typeof(decimal), "0.01", "10000", ErrorMessage = "Ingresa el importe transferido.")]
+        public decimal Monto { get; set; }
+        [Required(ErrorMessage = "Adjunta el voucher en PDF o imagen.")]
+        public string Archivo { get; set; } = "";
+    }
+
+    private List<Pago> pagos = [];
+    private Postulacion? registrando;
+    private FormularioVoucher modelo = new();
+    private Voucher? porRetirar;
+
+    protected override void OnInitialized() => Cargar();
+
+    // Solo los pagos del postulante de la sesión: nunca se muestran vouchers de otras personas.
+    private void Cargar()
+    {
+        var mias = Datos.Postulaciones.Where(p => p.PostulanteId == Datos.PostulanteActualId).Select(p => p.Id).ToHashSet();
+        pagos = Datos.Pagos.Where(x => mias.Contains(x.PostulacionId)).OrderByDescending(x => x.FechaGeneracion).ToList();
+    }
+
+    private void AbrirRegistro(Postulacion p, Pago pago)
+    {
+        modelo = new() { Monto = pago.Monto };
+        registrando = p;
+    }
+
+    private void Registrar()
+    {
+        if (registrando is null) return;
+        Datos.RegistrarVoucher(registrando, modelo.CodigoOperacion, modelo.Monto, modelo.Archivo);
+        Avisos.Exito("Voucher registrado; te avisaremos cuando sea validado");
+        registrando = null;
+        Cargar();
+    }
+
+    private void Retirar()
+    {
+        if (porRetirar is null) return;
+        Datos.RetirarVoucher(porRetirar);
+        Avisos.Exito("Voucher retirado");
+        porRetirar = null;
+        Cargar();
+    }
+}
